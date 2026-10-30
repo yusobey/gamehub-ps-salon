@@ -6,5 +6,5 @@ GUNCELLEME_ADRESI: Yayınladığınız 'surum.json' dosyasının İNTERNET adres
                    Örnek (GitHub Releases): 
                    https://github.com/KULLANICI/DEPO/releases/latest/download/surum.json
 """
-SURUM = "1.0.0"
+SURUM = "1.0.1"
 GUNCELLEME_ADRESI = "https://github.com/yusobey/gamehub-ps-salon/releases/latest/download/surum.json"
