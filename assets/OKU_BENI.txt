@@ -1,0 +1,3 @@
+icon.ico / icon.png : uygulama ve pencere ikonu (build.bat .exe'ye de koyar)
+logo_kafa.png       : sol ustteki marka alani logosu
+Bu dosyalari ayni adla degistirirseniz uygulama otomatik kullanir.
