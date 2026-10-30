@@ -264,7 +264,10 @@ class _TamSilinebilirSatir(QLineEdit):
 class SessizDoubleSpinBox(QDoubleSpinBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        # NOT: ButtonSymbols.NoButtons KULLANMIYORUZ - yeni Qt sürümlerinde (6.12) QSS ile
+        # birlikte iç yazı alanını 1 piksele çökertip rakamları GÖRÜNMEZ yapıyordu.
+        # Okları bunun yerine tema QSS'inde (#sessizSpin) sıfır genişliğe indiriyoruz.
+        self.setObjectName("sessizSpin")
         # Varsayılan iç satırı, TAMAMEN silmeye izin veren kendi satırımızla
         # DEĞİŞTİRİYORUZ - bkz. _TamSilinebilirSatir docstring'i.
         self.setLineEdit(_TamSilinebilirSatir(self))
@@ -309,7 +312,10 @@ class SessizDoubleSpinBox(QDoubleSpinBox):
 class SessizSpinBox(QSpinBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        # NOT: ButtonSymbols.NoButtons KULLANMIYORUZ - yeni Qt sürümlerinde (6.12) QSS ile
+        # birlikte iç yazı alanını 1 piksele çökertip rakamları GÖRÜNMEZ yapıyordu.
+        # Okları bunun yerine tema QSS'inde (#sessizSpin) sıfır genişliğe indiriyoruz.
+        self.setObjectName("sessizSpin")
         # Varsayılan iç satırı, TAMAMEN silmeye izin veren kendi satırımızla
         # DEĞİŞTİRİYORUZ - bkz. _TamSilinebilirSatir docstring'i.
         self.setLineEdit(_TamSilinebilirSatir(self))
