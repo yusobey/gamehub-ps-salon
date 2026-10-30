@@ -202,6 +202,11 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
     color: {RENK['text']};
 }}
 QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{ border: 1px solid {RENK['accent']}; }}
+/* Sayı kutularındaki yukarı/aşağı oklar görünmesin (rakam yazmak için) - NoButtons yerine
+   bu yöntem Qt 6.12'de yazı alanının daralmasına yol açmıyor. */
+QAbstractSpinBox#sessizSpin::up-button, QAbstractSpinBox#sessizSpin::down-button {{
+    width: 0px; height: 0px; border: none; padding: 0; margin: 0;
+}}
 /* Tarih seçici (Kasa > Genel > Tarihe Git) açılır takvimi - eskiden stil
    hiç verilmemişti, Qt'nin varsayılan KOYU/siyah takvimi çıkıyordu (bildirilen
    görünüm hatası). Takvimin her parçasını (üst gezinme çubuğu, gün başlıkları,
