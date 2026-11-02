@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, QTime
 from datetime import datetime, timedelta
 
 from core.models import Masa, AcilisModu, OdemeYontemi, MasaDurumu, KasaIslemi, Borc, next_id
-from core.pricing import minutes_for_amount, round_up_5, para_ustunu_dagitimdan_dus
+from core.pricing import minutes_for_amount, round_up_5, odenecek_tutar, para_ustunu_dagitimdan_dus
 from core.theme import RENK
 from ui.widgets import SessizDoubleSpinBox, SessizSpinBox, soru_sor, uyar, bilgilendir, OrtalanmisDialog, SessizComboBox, SessizTimeEdit
 
@@ -417,21 +417,20 @@ class OdemeAlDialog(OrtalanmisDialog):
         """Girilen ödemeler sabit kalır; ödenecek tutarı girilen toplama indirecek kadar indirim yazar."""
         import math
         girilen = sum(s.value() for s in self.yontem_inputs.values())
-        ham = self.masa.genel_toplam()
-        yeni = max(0, min(math.ceil(ham - girilen), math.floor(ham)))
+        taban = round_up_5(self.masa.genel_toplam())
+        yeni = max(0, min(math.ceil(taban - girilen), taban))
         self.indirim_spin.setValue(yeni)  # valueChanged -> _yeniden_hesapla
 
-    def _toplam(self) -> float:
-        ham = self.masa.genel_toplam() - self.indirim
-        return max(0.0, ham)
+    def _toplam(self) -> int:
+        return odenecek_tutar(self.masa.genel_toplam(), self.indirim)
 
     def _yeniden_hesapla(self):
         self.indirim = self.indirim_spin.value()
         toplam = self._toplam()
-        self.toplam_lbl.setText(f"Ödenecek: {round_up_5(toplam)} ₺")
+        self.toplam_lbl.setText(f"Ödenecek: {toplam} ₺")
 
         girilen = sum(s.value() for s in self.yontem_inputs.values())
-        kalan = round_up_5(toplam) - girilen
+        kalan = toplam - girilen
         ortak_stil = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         self.kalani_indirim_btn.setVisible(kalan > 0 and girilen > 0)
         if kalan > 0:
@@ -454,7 +453,7 @@ class OdemeAlDialog(OrtalanmisDialog):
         self._yeniden_hesapla()
 
     def _tamamla(self):
-        toplam = round_up_5(self._toplam())
+        toplam = self._toplam()
         girilen = sum(s.value() for s in self.yontem_inputs.values())
         if girilen < toplam:
             uyar(self, "Eksik Ödeme", "Girilen tutar, ödenecek tutardan az olamaz.")
@@ -1284,7 +1283,7 @@ class AlisverisDialog(OrtalanmisDialog):
                 w.deleteLater()
 
         toplam_ham = self._sepet_toplami()
-        self.toplam_lbl = QLabel(f"Ödenecek: {round_up_5(max(0.0, toplam_ham - self.indirim))} ₺")
+        self.toplam_lbl = QLabel(f"Ödenecek: {odenecek_tutar(toplam_ham, self.indirim)} ₺")
         self.toplam_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.toplam_lbl.setStyleSheet(f"font-size:22px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
         layout.addWidget(self.toplam_lbl)
@@ -1357,13 +1356,13 @@ class AlisverisDialog(OrtalanmisDialog):
         self.indirim = self.indirim_spin.value()
         self.state.masasiz_indirim = self.indirim
         toplam_ham = self._sepet_toplami()
-        self.toplam_lbl.setText(f"Ödenecek: {round_up_5(max(0.0, toplam_ham - self.indirim))} ₺")
+        self.toplam_lbl.setText(f"Ödenecek: {odenecek_tutar(toplam_ham, self.indirim)} ₺")
         self._kalan_guncelle()
 
     def _kalan_guncelle(self):
-        toplam = max(0.0, self._sepet_toplami() - self.indirim)
+        toplam = odenecek_tutar(self._sepet_toplami(), self.indirim)
         girilen = sum(s.value() for s in self.yontem_inputs.values())
-        kalan = round_up_5(toplam) - girilen
+        kalan = toplam - girilen
         ortak_stil = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         if kalan > 0:
             self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
@@ -1376,7 +1375,7 @@ class AlisverisDialog(OrtalanmisDialog):
             self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak_stil}")
 
     def _tamamla(self):
-        toplam = round_up_5(max(0.0, self._sepet_toplami() - self.indirim))
+        toplam = odenecek_tutar(self._sepet_toplami(), self.indirim)
         girilen = sum(s.value() for s in self.yontem_inputs.values())
         if girilen < toplam:
             uyar(self, "Eksik Ödeme", "Girilen tutar, ödenecek tutardan az olamaz.")
