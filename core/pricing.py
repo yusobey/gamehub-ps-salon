@@ -69,6 +69,13 @@ def round_up_5(amount: float) -> int:
     return int(math.ceil(amount / 5.0) * 5)
 
 
+def odenecek_tutar(ham_toplam: float, indirim: float = 0.0) -> int:
+    """Ödenecek tutar: önce ekranda görünen toplam 5 TL'ye yuvarlanır, İNDİRİM bundan TAM
+    olarak düşülür (125 - 119 = 6; eskiden 6 -> 10'a yuvarlanıyordu, hatalıydı).
+    İndirim girilmediyse sonuç eskisiyle aynıdır."""
+    return max(0, round_up_5(ham_toplam) - int(round(indirim or 0)))
+
+
 def devam_price_for_elapsed(hourly_rate: float, elapsed_seconds: float) -> float:
     """
     Kol Değiştir ('şu andan itibaren') veya Masa Taşı sonrası DEVAM EDEN dilim
@@ -178,8 +185,13 @@ class TariffSegment:
         end = self.end_time or (now or datetime.now())
         return max(0.0, (end - self.start_time).total_seconds())
 
-    def current_raw_amount(self, now: datetime | None = None) -> float:
+    def current_raw_amount(self, now: datetime | None = None, azami_saniye: float | None = None) -> float:
         elapsed = self.elapsed_seconds(now)
+        if azami_saniye is not None and not self.devam_segmenti and elapsed >= azami_saniye:
+            # Süreli masa (Süre/Tutar ile Aç) dolduğunda ücret, satın alınan sürenin tam sonundaki
+            # fiyattır: 30 dk = ilk 30 dk sabit ücret. (Tam 30:00'da dakika sayacı bir sonraki
+            # basamağa geçtiği için eskiden 125 yerine 130, 85 yerine 90 çıkıyordu.)
+            elapsed = max(0.0, azami_saniye - 1e-6)
         if self.devam_segmenti:
             ham = devam_price_for_elapsed(self.hourly_rate, elapsed)
         else:

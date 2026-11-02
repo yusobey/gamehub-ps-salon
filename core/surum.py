@@ -6,7 +6,7 @@ GUNCELLEME_ADRESI: Yayınladığınız 'surum.json' dosyasının İNTERNET adres
                    Örnek (GitHub Releases): 
                    https://github.com/KULLANICI/DEPO/releases/latest/download/surum.json
 """
-SURUM = "1.0.2"
+SURUM = "1.0.3"
 GUNCELLEME_ADRESI = "https://github.com/yusobey/gamehub-ps-salon/releases/latest/download/surum.json"
 
 # Güncelleme bildirimlerini doğrulayan AÇIK anahtar. Karşılığı olan GİZLİ anahtar yalnızca GitHub

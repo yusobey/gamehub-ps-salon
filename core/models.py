@@ -115,7 +115,11 @@ class Masa:
     def guncel_masa_ucreti_ham(self, now: datetime | None = None) -> float:
         if not self.segments:
             return 0.0
-        return self.segments[-1].current_raw_amount(now)
+        azami = None
+        if self.hedef_saniye is not None and self.acilis_modu != AcilisModu.NORMAL:
+            onceki = sum(s.elapsed_seconds(now) for s in self.segments[:-1])
+            azami = max(0.0, self.hedef_saniye - onceki)
+        return self.segments[-1].current_raw_amount(now, azami)
 
     def guncel_masa_ucreti(self, now: datetime | None = None) -> int:
         return round_up_5(self.guncel_masa_ucreti_ham(now))
