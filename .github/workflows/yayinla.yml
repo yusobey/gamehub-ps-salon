@@ -1,0 +1,49 @@
+name: Surum Yayinla
+on:
+  workflow_dispatch:
+    inputs:
+      notlar:
+        description: "Yenilik notlari (musteri guncelleme ekraninda gorur)"
+        required: true
+        default: "Iyilestirmeler ve hata duzeltmeleri."
+permissions:
+  contents: write
+jobs:
+  yayinla:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install PyQt6==6.12.0 pyinstaller
+      - name: Surumu oku ve daha once yayinlanmis mi kontrol et
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Select-String -Path core/surum.py -Pattern 'SURUM\s*=\s*"([0-9.]+)"').Matches[0].Groups[1].Value
+          "SURUM=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          gh release view "v$v" --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Error "v$v zaten yayinlanmis. core/surum.py icindeki SURUM'u artirin."; exit 1 }
+          $global:LASTEXITCODE = 0
+      - run: python -m PyInstaller --name GameHub_PS_Salon --onedir --windowed --noconfirm --clean --icon assets/icon.ico --add-data "assets;assets" main.py
+      - run: choco install innosetup -y --no-progress
+      - name: Setup uret
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSurum=$env:SURUM" kurulum.iss'
+      - name: Imzali surum.json uret
+        shell: pwsh
+        env:
+          GUNCELLEME_ANAHTARI: ${{ secrets.GUNCELLEME_ANAHTARI }}
+          NOTLAR: ${{ inputs.notlar }}
+        run: |
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$env:SURUM/GameHub_Kurulum_$env:SURUM.exe"
+          python arac/surum_imzala.py "Output/GameHub_Kurulum_$env:SURUM.exe" $env:SURUM $url
+      - name: Release yayinla
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTLAR: ${{ inputs.notlar }}
+        run: |
+          gh release create "v$env:SURUM" "Output/GameHub_Kurulum_$env:SURUM.exe" surum.json --repo ${{ github.repository }} --title "$env:SURUM" --notes "$env:NOTLAR"
