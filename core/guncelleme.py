@@ -21,7 +21,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from core import ed25519
 from core.lisans import ACIK_ANAHTAR
-from core.surum import SURUM, GUNCELLEME_ADRESI
+from core.surum import SURUM, GUNCELLEME_ADRESI, GUNCELLEME_ACIK_ANAHTAR
 
 
 def surum_tuple(s: str) -> tuple:
@@ -37,7 +37,10 @@ def bildirim_imza_mesaji(b: dict) -> bytes:
 
 def bildirimi_dogrula(b: dict) -> bool:
     try:
-        return ed25519.verify(ACIK_ANAHTAR, bildirim_imza_mesaji(b), bytes.fromhex(b["imza"]))
+        mesaj, imza = bildirim_imza_mesaji(b), bytes.fromhex(b["imza"])
+        # Önce güncelleme anahtarı (otomatik yayın), olmazsa eski satıcı anahtarı (elle yayın)
+        return any(ed25519.verify(k, mesaj, imza)
+                   for k in (bytes.fromhex(GUNCELLEME_ACIK_ANAHTAR), ACIK_ANAHTAR))
     except Exception:
         return False
 

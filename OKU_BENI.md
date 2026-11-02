@@ -19,15 +19,15 @@ veya yönetici olarak `Program Files`), Başlat menüsü, masaüstü kısayolu, 
 - Ürün görselleri seçildiği anda bu klasördeki `gorseller` içine **kopyalanır**; masaüstündeki orijinal silinse de ürün görseli kalır.
 - Güncelleme ve kaldırma verileri **silmez**. *Yedek Al / Yedekten Geri Yükle* aynı sayfadadır.
 
-## 🔄 Uzaktan güncelleme nasıl çalışır?
-1. Yeni sürüm hazırlarsınız: `core/surum.py` içinde `SURUM`'u artırın (örn. `1.1.0`), `build.bat` ile yeni Setup üretin.
-2. Setup dosyasını internete koyun (örn. GitHub *Releases*; adresi sabit kalır).
-3. Satıcı klasöründeki **`SURUM_YAYINLA.bat`** ile `surum.json` üretin (dosyayı SHA256 ile parmak izler ve **gizli anahtarınızla imzalar**). `surum.json`'u da aynı yere yükleyin.
-4. Müşterilerdeki program açılışta `surum.json`'a bakar: yeni sürüm varsa notlarla birlikte *"Şimdi Güncelle / Sonra"* sorar → indirir → imza + parmak izi **doğrular** (tutmazsa kurmaz) → kendini kapatıp güncelleyip yeniden açar. Verileri korunur.
+## 🔄 Uzaktan güncelleme (tek tıkla yayın)
+1. Değişen dosyaları GitHub'a yükleyin. `core/surum.py` içindeki `SURUM`'u artırın (örn. `1.0.3`).
+2. GitHub › **Actions › Surum Yayinla › Run workflow** → yenilik notunu yazın → **Run workflow**.
+3. ~3 dakika sonra GitHub otomatik olarak Setup'ı derler, imzalı `surum.json`'u üretir ve **Release** olarak yayınlar.
+4. Müşterilerin programı bir sonraki açılışta "Yeni sürüm var" penceresini gösterir; imza ve parmak izi doğrulanınca kurar, program yeniden açılır. Veriler korunur.
 
-**Tek seferlik ayar:** `core/surum.py` içindeki `GUNCELLEME_ADRESI` değerine `surum.json`'un sabit adresini yazın
-(GitHub Releases ile: `https://github.com/KULLANICI/DEPO/releases/latest/download/surum.json`), sonra Setup'ı bir kez üretin.
-Boş bırakılırsa otomatik güncelleme kapalıdır. Bu ayar yapılmadan **önce** dağıtılan sürümler güncelleme alamaz.
+Tek seferlik ayar: depoda **Settings › Secrets and variables › Actions › New repository secret** → adı `GUNCELLEME_ANAHTARI`,
+değeri satıcı paketindeki `guncelleme_anahtari.txt` içeriği. Bu anahtar yalnızca güncelleme imzalar (lisans üretemez).
+Aynı sürüm numarası ikinci kez yayınlanamaz (workflow durur): önce `SURUM`'u artırın.
 
 ## 🔑 Lisans ve Giriş
 
