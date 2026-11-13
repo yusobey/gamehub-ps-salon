@@ -824,8 +824,21 @@ class BorclarView(QWidget):
             f"font-size:15px; font-weight:800; color:{RENK['warning']}; background:#FFFFFF;"
             f"border:1px solid {RENK['border_strong']}; border-radius:10px; padding:8px 16px;"
         )
+        self.toplam_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toplam_lbl.setToolTip("Kişi bazlı borç dökümü ve toplu ödeme için tıklayın")
+        self.toplam_lbl.mousePressEvent = lambda e: (
+            self._kisi_dokumu_ac() if e.button() == Qt.MouseButton.LeftButton else None
+        )
         alt_cubuk.addWidget(self.toplam_lbl)
         dis.addLayout(alt_cubuk)
+        self.yenile()
+
+    def _kisi_dokumu_ac(self):
+        """Alttaki toplam tutara tıklayınca: kim adına kaç ₺ borç var + toplu ödeme."""
+        if not any(not b.odendi for b in self.state.borclar):
+            bilgilendir(self, "Borçlar", "Açık borç yok.")
+            return
+        _KisiBorclariDialog(self.state, self).exec()
         self.yenile()
 
     def _secimi_temizle(self):
@@ -849,7 +862,9 @@ class BorclarView(QWidget):
         else:
             toplam = sum(b.tutar for b in acik_borclar)
             self.toplam_lbl.setText(f"Tüm açık borçlar ({len(acik_borclar)}):  {toplam:.0f} ₺")
-            self.ipucu_lbl.setText("Toplam görmek için kartlara tıklayarak seçin" if acik_borclar else "")
+            self.ipucu_lbl.setText(
+                "Kartlara tıklayarak seçin  •  Kişi bazlı döküm ve toplu ödeme için sağdaki toplama tıklayın"
+                if acik_borclar else "")
         self.secimi_temizle_btn.setVisible(bool(secililer))
 
     def _hesapla_sutun(self) -> int:
@@ -991,6 +1006,201 @@ class BorclarView(QWidget):
             from datetime import datetime
             borc.odenme_zamani = datetime.now()
             self.yenile()
+
+
+def _ad_anahtari(ad: str) -> str:
+    """Aynı kişinin farklı yazımlarını (büyük/küçük harf, fazla boşluk, İ/I) tek kişi sayar."""
+    t = " ".join((ad or "").split()).replace("İ", "i").replace("I", "ı")
+    return t.lower()
+
+
+class _KisiBorclariDialog(OrtalanmisDialog):
+    """Kim adına kaç ₺ açık borç var; satırdaki 'Toplu Öde' ile o kişinin borçları tek seferde kapatılır."""
+    def __init__(self, state: AppState, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self.setWindowTitle("Kişi Bazlı Borçlar")
+        self.setMinimumWidth(460)
+        v = QVBoxLayout(self)
+        v.setSpacing(8)
+        self.ozet_lbl = QLabel()
+        self.ozet_lbl.setStyleSheet("font-weight:800; font-size:14px; background:transparent; border:none;")
+        v.addWidget(self.ozet_lbl)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(260)
+        scroll.setStyleSheet("QScrollArea { border:none; background:transparent; }")
+        self.ic = QWidget()
+        self.ic.setObjectName("kisiBorcIc")
+        self.ic.setStyleSheet("QWidget#kisiBorcIc { background:transparent; }")
+        self.liste = QVBoxLayout(self.ic)
+        self.liste.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(self.ic)
+        v.addWidget(scroll)
+        kapat = QPushButton("Kapat")
+        kapat.setObjectName("ghostBtn")
+        kapat.clicked.connect(self.accept)
+        v.addWidget(kapat, 0, Qt.AlignmentFlag.AlignRight)
+        self._doldur()
+
+    def kisiler(self):
+        gruplar: dict[str, list[Borc]] = {}
+        for b in self.state.borclar:
+            if not b.odendi:
+                gruplar.setdefault(_ad_anahtari(b.ad_soyad), []).append(b)
+        sonuc = [(l[0].ad_soyad.strip() or "(isimsiz)", l, sum(b.tutar for b in l)) for l in gruplar.values()]
+        sonuc.sort(key=lambda x: -x[2])
+        return sonuc
+
+    def _doldur(self):
+        while self.liste.count():
+            it = self.liste.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        kisiler = self.kisiler()
+        toplam = sum(k[2] for k in kisiler)
+        self.ozet_lbl.setText(f"{len(kisiler)} kişi  •  Toplam açık borç: {toplam:.0f} ₺")
+        if not kisiler:
+            self.liste.addWidget(QLabel("Açık borç kalmadı ✓"))
+            return
+        for ad, borclar, tutar in kisiler:
+            satir = QFrame()
+            satir.setObjectName("masaKart")
+            h = QHBoxLayout(satir)
+            h.setContentsMargins(12, 8, 12, 8)
+            sol = QVBoxLayout()
+            sol.setSpacing(1)
+            a = QLabel(f"👤 {ad}")
+            a.setStyleSheet("font-weight:800; font-size:13px;")
+            sol.addWidget(a)
+            n = QLabel(f"{len(borclar)} borç")
+            n.setStyleSheet(f"font-size:10px; color:{RENK['text_muted']};")
+            sol.addWidget(n)
+            h.addLayout(sol, 1)
+            t = QLabel(f"{tutar:.0f} ₺")
+            t.setStyleSheet(f"font-size:16px; font-weight:800; color:{RENK['warning']};")
+            h.addWidget(t)
+            btn = QPushButton("Toplu Öde")
+            btn.setObjectName("primaryBtn")
+            btn.setStyleSheet("padding:4px 10px; font-size:11px; font-weight:700;")
+            btn.clicked.connect(lambda _=False, ad=ad, bl=list(borclar): self._toplu_ode(ad, bl))
+            h.addWidget(btn)
+            self.liste.addWidget(satir)
+
+    def _toplu_ode(self, ad: str, borclar: list):
+        d = _TopluBorcOdemeDialog(ad, borclar, self)
+        if d.exec() and d.tamamlandi:
+            simdi = datetime.now()
+            toplam = sum(b.tutar for b in d.secili)
+            etiket = f"[BORÇ TAHSİLATI] {ad}"
+            if len(d.secili) > 1:
+                etiket += f" ({len(d.secili)} borç)"
+            self.state.kasa_islemleri.append(KasaIslemi(
+                id=next_id(), masa_adi=etiket, toplam_tutar=toplam,
+                odeme_dagilimi=d.dagitim, is_borc_tahsilati=True))
+            for b in d.secili:
+                b.odendi = True
+                b.odenme_zamani = simdi
+            self._doldur()
+
+
+class _TopluBorcOdemeDialog(OrtalanmisDialog):
+    """Bir kişinin açık borçlarından işaretlenenleri TEK ödemeyle kapatır (hepsi varsayılan işaretli;
+    tek tek bazıları ödenecekse işareti kaldırılır, kalanlar borç olarak durur)."""
+    def __init__(self, ad: str, borclar: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Toplu Borç Öde - {ad}")
+        self.setMinimumWidth(400)
+        self.borclar = borclar
+        self.secili: list = []
+        self.dagitim = {}
+        self.tamamlandi = False
+        v = QVBoxLayout(self)
+        v.setSpacing(8)
+        v.addWidget(QLabel("Ödenecek borçları işaretleyin:"))
+        self.kutular: list[tuple[QCheckBox, Borc]] = []
+        for b in sorted(borclar, key=lambda x: x.olusturma_zamani):
+            kaynak = f"  •  {b.kaynak_masa_adi}" if b.kaynak_masa_adi else ""
+            cb = QCheckBox(f"{tarih_okunakli(b.olusturma_zamani)}{kaynak}  —  {b.tutar:.0f} ₺")
+            cb.setChecked(True)
+            cb.toggled.connect(self._hesapla)
+            v.addWidget(cb)
+            self.kutular.append((cb, b))
+        self.tutar_lbl = QLabel()
+        self.tutar_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.tutar_lbl.setStyleSheet(f"font-size:20px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
+        v.addWidget(self.tutar_lbl)
+        baslik = QLabel("Ödeme Dağılımı")
+        baslik.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        baslik.setStyleSheet("font-weight:700; margin-top:6px;")
+        v.addWidget(baslik)
+        ikon = {"NAKİT": "💵", "KART": "💳", "İBAN": "🏦"}
+        self.inputs = {}
+        for yontem in ["NAKİT", "KART", "İBAN"]:
+            row = QHBoxLayout()
+            row.addStretch()
+            et = QLabel(f"{ikon[yontem]}  {yontem}")
+            et.setMinimumWidth(100)
+            et.setStyleSheet("font-weight:600;")
+            row.addWidget(et)
+            spin = SessizDoubleSpinBox()
+            spin.setRange(0, 999999)
+            spin.setDecimals(0)
+            spin.setFixedWidth(130)
+            spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            spin.valueChanged.connect(self._hesapla)
+            self.inputs[yontem] = spin
+            row.addWidget(spin)
+            row.addStretch()
+            v.addLayout(row)
+        self.kalan_lbl = QLabel()
+        self.kalan_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self.kalan_lbl)
+        self.tamamla_btn = QPushButton("Ödemeyi Tamamla")
+        self.tamamla_btn.setObjectName("odemeBtn")
+        self.tamamla_btn.setDefault(True)
+        self.tamamla_btn.setAutoDefault(True)
+        self.tamamla_btn.clicked.connect(self._tamamla)
+        v.addWidget(self.tamamla_btn)
+        self._hesapla()
+
+    def _hedef(self) -> float:
+        return sum(b.tutar for cb, b in self.kutular if cb.isChecked())
+
+    def _hesapla(self, *_):
+        hedef = self._hedef()
+        adet = sum(1 for cb, _b in self.kutular if cb.isChecked())
+        self.tutar_lbl.setText(f"Ödenecek ({adet} borç): {hedef:.0f} ₺")
+        girilen = sum(s.value() for s in self.inputs.values())
+        kalan = hedef - girilen
+        ortak = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
+        if kalan > 0:
+            self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
+            self.kalan_lbl.setStyleSheet(f"color:#f5a623; {ortak}")
+        elif kalan < 0:
+            self.kalan_lbl.setText(f"Para Üstü: {abs(kalan):.0f} ₺")
+            self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak}")
+        else:
+            self.kalan_lbl.setText("Tam ödendi ✓" if hedef > 0 else "Borç seçilmedi")
+            self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak}")
+        self.tamamla_btn.setEnabled(adet > 0)
+
+    def _tamamla(self):
+        secili = [b for cb, b in self.kutular if cb.isChecked()]
+        hedef = sum(b.tutar for b in secili)
+        if not secili:
+            return
+        girilen = sum(s.value() for s in self.inputs.values())
+        if girilen < hedef:
+            uyar(self, "Eksik Ödeme", "Girilen tutar seçili borçların toplamından az olamaz.")
+            return
+        ham = {k: v.value() for k, v in self.inputs.items() if v.value() > 0}
+        self.dagitim = para_ustunu_dagitimdan_dus(ham, hedef)
+        self.secili = secili
+        self.tamamlandi = True
+        self.accept()
 
 
 class _BorcOdemeDialog(OrtalanmisDialog):
