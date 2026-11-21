@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTime
 from datetime import datetime, timedelta
 
+from core.bicim import tl
 from core.models import Masa, AcilisModu, OdemeYontemi, MasaDurumu, KasaIslemi, Borc, next_id
 from core.pricing import minutes_for_amount, round_up_5, odenecek_tutar, para_ustunu_dagitimdan_dus
 from core.theme import RENK
@@ -41,7 +42,7 @@ class MasaAcDialog(OrtalanmisDialog):
         
 
         for tarife_adi, ucret in self.tarifeler.items():
-            btn = QPushButton(f"{tarife_adi}  ·  {ucret:.0f} ₺/saat")
+            btn = QPushButton(f"{tarife_adi}  ·  {tl(ucret)} ₺/saat")
             btn.setObjectName("secenekBtn")
             btn.setAutoDefault(False)
             btn.clicked.connect(lambda checked, t=tarife_adi, u=ucret: self._normal_ac(t, u))
@@ -119,7 +120,7 @@ class MasaAcDialog(OrtalanmisDialog):
                 w.deleteLater()
         layout.addWidget(QLabel(f"{profil_adi}  ·  Kol seç"))
         for kol_adi, ucret in self.tum_profiller.get(profil_adi, {}).items():
-            btn = QPushButton(f"{kol_adi}  ·  {ucret:.0f} ₺/saat")
+            btn = QPushButton(f"{kol_adi}  ·  {tl(ucret)} ₺/saat")
             btn.setObjectName("secenekBtn")
             btn.setAutoDefault(False)
             btn.clicked.connect(
@@ -160,6 +161,29 @@ class MasaAcDialog(OrtalanmisDialog):
         dk_spin.setValue(60)
         dk_row.addWidget(dk_spin)
         v.addLayout(dk_row)
+
+        # En sık kullanılan süreler için hazır butonlar: tıklayınca dakika kutusu o değere ayarlanır
+        # (farklı bir süre isteyen yine kutuya elle yazar).
+        hizli_row = QHBoxLayout()
+        hizli_row.setSpacing(6)
+        hizli_butonlar: dict[int, QPushButton] = {}
+        for dk in (30, 60, 90, 120):
+            hb = QPushButton(f"{dk} DK")
+            hb.setObjectName("secenekBtn")
+            hb.setCheckable(True)
+            hb.setAutoDefault(False)
+            hb.clicked.connect(lambda checked, d=dk: dk_spin.setValue(d))
+            hizli_row.addWidget(hb)
+            hizli_butonlar[dk] = hb
+        v.addLayout(hizli_row)
+
+        def hizli_isaretle(deger):
+            for d, hb in hizli_butonlar.items():
+                hb.setChecked(d == deger)
+        dk_spin.valueChanged.connect(hizli_isaretle)
+        hizli_isaretle(dk_spin.value())
+        self.sure_hizli_butonlar = hizli_butonlar
+        self.sure_dk_spin = dk_spin
 
         onay = QPushButton("Başlat")
         onay.setObjectName("primaryBtn")
@@ -261,7 +285,7 @@ class MasaIslemDialog(OrtalanmisDialog):
         ad_lbl = QLabel(masa.ad)
         ad_lbl.setStyleSheet("color:#6B6F7A; font-size:12px; font-weight:700; background:transparent; border:none; letter-spacing:1px;")
         ukv.addWidget(ad_lbl)
-        tutar_lbl = QLabel(f"{masa.genel_toplam()} ₺")
+        tutar_lbl = QLabel(f"{tl(masa.genel_toplam())} ₺")
         tutar_lbl.setStyleSheet("color:#00E676; font-size:26px; font-weight:800; background:transparent; border:none;")
         ukv.addWidget(tutar_lbl)
         v.addWidget(ust_kart)
@@ -405,6 +429,13 @@ class OdemeAlDialog(OrtalanmisDialog):
         tamamla_btn.clicked.connect(self._tamamla)
         v.addWidget(tamamla_btn)
 
+        aktar_btn = QPushButton("↪ Masa Ücretini Başka Masaya Aktar")
+        aktar_btn.setObjectName("ghostBtn")
+        aktar_btn.setAutoDefault(False)
+        aktar_btn.clicked.connect(self._baska_masaya_aktar)
+        v.addWidget(aktar_btn)
+        self.aktar_btn = aktar_btn
+
         vazgec_btn = QPushButton("Vazgeç")
         vazgec_btn.setObjectName("ghostBtn")
         vazgec_btn.setAutoDefault(False)
@@ -412,6 +443,27 @@ class OdemeAlDialog(OrtalanmisDialog):
         v.addWidget(vazgec_btn)
 
         self._yeniden_hesapla()
+
+    def _baska_masaya_aktar(self):
+        """Bu masanın hesabını (masa ücreti + ürünler) ödeme almadan başka bir AÇIK masaya taşır;
+        bu masa kapanır, ödeme sonradan o masadan alınır."""
+        adaylar = [m for m in self.state.masalar if m is not self.masa and m.durum != MasaDurumu.BOS]
+        d = MasaAktarDialog(self.masa, adaylar, self)
+        if not d.exec() or d.secilen is None:
+            return
+        hedef = d.secilen
+        tutar = self.masa.masa_ucretini_aktar(hedef)
+        self.state.kasa_islemleri.append(KasaIslemi(
+            id=next_id(), masa_adi=self.masa.ad, toplam_tutar=0.0, odeme_dagilimi={},
+            acilis_zamani=self.masa.ilk_acilis_zamani,
+            masa_ucreti=self.masa.guncel_masa_ucreti() + self.masa.aktarilan_toplami(),
+            urunler=[{"ad": u.urun_adi, "adet": u.adet, "birim_fiyat": u.birim_fiyat} for u in self.masa.urunler],
+            iptal_nedeni=f"Hesap {hedef.ad} masasına aktarıldı ({tl(tutar)} ₺) - ciroya yazılmadı; ödeme {hedef.ad} üzerinden alınacak.",
+            aktarim_hedef=hedef.ad,
+        ))
+        self.masa.kapat_ve_sifirla()
+        self.tamamlandi = True
+        self.accept()
 
     def _kalani_indirim_yap(self):
         """Girilen ödemeler sabit kalır; ödenecek tutarı girilen toplama indirecek kadar indirim yazar."""
@@ -427,17 +479,17 @@ class OdemeAlDialog(OrtalanmisDialog):
     def _yeniden_hesapla(self):
         self.indirim = self.indirim_spin.value()
         toplam = self._toplam()
-        self.toplam_lbl.setText(f"Ödenecek: {toplam} ₺")
+        self.toplam_lbl.setText(f"Ödenecek: {tl(toplam)} ₺")
 
         girilen = sum(s.value() for s in self.yontem_inputs.values())
         kalan = toplam - girilen
         ortak_stil = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         self.kalani_indirim_btn.setVisible(kalan > 0 and girilen > 0)
         if kalan > 0:
-            self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
+            self.kalan_lbl.setText(f"Kalan: {tl(kalan)} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#f5a623; {ortak_stil}")
         elif kalan < 0:
-            self.kalan_lbl.setText(f"Para Üstü: {abs(kalan):.0f} ₺")
+            self.kalan_lbl.setText(f"Para Üstü: {tl(abs(kalan))} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak_stil}")
         else:
             self.kalan_lbl.setText("Tam ödendi ✓")
@@ -479,9 +531,10 @@ class OdemeAlDialog(OrtalanmisDialog):
             id=next_id(), masa_adi=self.masa.ad, toplam_tutar=toplam,
             odeme_dagilimi=dagitim, indirim_tutari=self.indirim,
             acilis_zamani=self.masa.ilk_acilis_zamani,
-            masa_ucreti=self.masa.guncel_masa_ucreti(),
+            masa_ucreti=self.masa.guncel_masa_ucreti() + self.masa.aktarilan_toplami(),
             is_borc_tahsilati=False, is_borc_olusturma=borc_tutari > 0,
             urunler=urun_anlik_goruntu,
+            aktarilanlar=[{"kaynak": a.kaynak_masa, "tutar": a.tutar} for a in self.masa.aktarilan_ucretler],
         )
         self.state.kasa_islemleri.append(islem)
 
@@ -494,6 +547,47 @@ class OdemeAlDialog(OrtalanmisDialog):
         self.masa.kapat_ve_sifirla()
         self.tamamlandi = True
         self.accept()
+
+
+class MasaAktarDialog(OrtalanmisDialog):
+    """Ücretin aktarılacağı AÇIK masayı seçtirir."""
+    def __init__(self, kaynak: Masa, adaylar: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{kaynak.ad} - Ücreti Aktar")
+        self.setMinimumWidth(340)
+        self.secilen = None
+        v = QVBoxLayout(self)
+        v.setSpacing(8)
+        ozet = QLabel(f"{kaynak.ad} hesabı: {tl(kaynak.genel_toplam())} ₺ (masa ücreti + ürünler)")
+        ozet.setStyleSheet("font-weight:800;")
+        ozet.setWordWrap(True)
+        v.addWidget(ozet)
+        not_lbl = QLabel("Hangi masaya aktarılsın? Seçilen masada \"" + kaynak.ad +
+                         " masasının ücreti\" olarak görünür ve ödeme o masadan alınır. "
+                         + kaynak.ad + " kapanır.")
+        not_lbl.setWordWrap(True)
+        not_lbl.setStyleSheet("color:#8b93a7; font-size:11px;")
+        v.addWidget(not_lbl)
+        if not adaylar:
+            v.addWidget(QLabel("Aktarılabilecek açık masa yok."))
+        for m in sorted(adaylar, key=lambda x: x.ad):
+            btn = QPushButton(f"{m.ad}   ·   şu an {tl(m.genel_toplam())} ₺")
+            btn.setObjectName("secenekBtn")
+            btn.setAutoDefault(False)
+            btn.clicked.connect(lambda checked, mm=m: self._sec(mm, kaynak))
+            v.addWidget(btn)
+        vazgec = QPushButton("Vazgeç")
+        vazgec.setObjectName("ghostBtn")
+        vazgec.setAutoDefault(False)
+        vazgec.clicked.connect(self.reject)
+        v.addWidget(vazgec)
+
+    def _sec(self, hedef, kaynak):
+        if soru_sor(self, "Ücreti Aktar",
+                    f"{kaynak.ad} hesabı ({tl(kaynak.genel_toplam())} ₺) {hedef.ad} masasına aktarılacak ve "
+                    f"{kaynak.ad} kapanacak. Onaylıyor musunuz?") == QMessageBox.StandardButton.Yes:
+            self.secilen = hedef
+            self.accept()
 
 
 # ============================================================
@@ -585,7 +679,7 @@ class UrunKartiChip(QFrame):
 
         # --- Alt: fiyat (NET/KOYU, artık sönük değil) + azalt butonu ---
         alt = QHBoxLayout()
-        fiyat_lbl = QLabel(f"{fiyat:.0f} ₺")
+        fiyat_lbl = QLabel(f"{tl(fiyat)} ₺")
         fiyat_lbl.setStyleSheet(f"color:{RENK['accent']}; font-size:15px; font-weight:800; background:transparent;")
         alt.addWidget(fiyat_lbl)
         alt.addStretch()
@@ -631,6 +725,9 @@ class UrunEkleDialog(OrtalanmisDialog):
         self.grid_widget = QWidget()
         self.grid = QGridLayout(self.grid_widget)
         self.grid.setSpacing(10)
+        # Kartlar HER KATEGORİDE sol-üstten dizilir; az ürünlü kategoride (örn. Kiralama) ortalanıp
+        # üstte büyük boşluk bırakmaz.
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.ana_layout.addWidget(self.grid_widget)
 
         # --- Sepet özeti: TEK uzun metin yerine, HER ürün KENDİ ayrı
@@ -644,6 +741,8 @@ class UrunEkleDialog(OrtalanmisDialog):
         self.sepet_alani = QHBoxLayout()
         self.sepet_alani.setSpacing(8)
         self.ana_layout.addLayout(self.sepet_alani)
+        # Artan dikey boşluk sepet kutularına DEĞİL, Kapat'ın üstündeki boşluğa gitsin
+        self.ana_layout.addStretch(1)
 
         kapat = QPushButton("Kapat")
         kapat.setObjectName("primaryBtn")
@@ -704,6 +803,11 @@ class UrunEkleDialog(OrtalanmisDialog):
 
         urunler = self.katalog.get(self.aktif_kategori, {})
         SUTUN = self._hesapla_urun_sutun()
+        # Ürün alanının yüksekliği kategoriler arasında SABİT kalsın (en kalabalık kategoriye göre,
+        # en fazla 3 sıra) - kategori değiştirince pencere/yerleşim zıplamasın.
+        en_cok = max((len(k) for k in self.katalog.values()), default=0)
+        sira = max(1, min(3, -(-en_cok // SUTUN)))
+        self.grid_widget.setMinimumHeight(sira * 172 + (sira - 1) * self.grid.spacing())
         for i, (urun_adi, veri) in enumerate(urunler.items()):
             chip = UrunKartiChip(
                 urun_adi, veri["fiyat"], veri.get("gorsel"), self.masa.urun_adedi(urun_adi),
@@ -737,6 +841,7 @@ class UrunEkleDialog(OrtalanmisDialog):
 
         for u in self.masa.urunler:
             kutu = QFrame()
+            kutu.setFixedHeight(36)
             kutu.setStyleSheet(
                 f"QFrame {{ background-color:{RENK['panel_hover']}; "
                 f"border:1px solid {RENK['border_strong']}; border-radius:8px; }}"
@@ -842,7 +947,7 @@ class MasaDuzenleDialog(OrtalanmisDialog):
         profil_adi = self.masa.aktif_tarife_profili
         kollar = self.tarife_profilleri.get(profil_adi, {})
         for kol_adi, ucret in kollar.items():
-            btn = QPushButton(f"{kol_adi}  ·  {ucret:.0f} ₺/saat")
+            btn = QPushButton(f"{kol_adi}  ·  {tl(ucret)} ₺/saat")
             btn.setObjectName("secenekBtn")
             btn.setAutoDefault(False)
             btn.clicked.connect(lambda checked, k=kol_adi, u=ucret: self._kol_secildi(profil_adi, k, u))
@@ -904,7 +1009,7 @@ class MasaDuzenleDialog(OrtalanmisDialog):
 
         layout.addWidget(QLabel(f"{profil_adi}  ·  Kol seç"))
         for kol_adi, ucret in self.tarife_profilleri.get(profil_adi, {}).items():
-            btn = QPushButton(f"{kol_adi}  ·  {ucret:.0f} ₺/saat")
+            btn = QPushButton(f"{kol_adi}  ·  {tl(ucret)} ₺/saat")
             btn.setObjectName("secenekBtn")
             btn.setAutoDefault(False)
             btn.clicked.connect(lambda checked, k=kol_adi, u=ucret, p=profil_adi: self._kol_secildi(p, k, u))
@@ -952,7 +1057,7 @@ class MasaDuzenleDialog(OrtalanmisDialog):
         return w
 
     def _uygula(self, acilistan: bool):
-        self._zamanlama_baslik.setText(f"Seçim: {self._secilen_kol}  ·  {self._secilen_ucret:.0f} ₺/saat")
+        self._zamanlama_baslik.setText(f"Seçim: {self._secilen_kol}  ·  {tl(self._secilen_ucret)} ₺/saat")
         self.masa.aktif_tarife_profili = self._secilen_profil
         if acilistan:
             self.masa.kol_degistir_acilistan(self._secilen_kol, self._secilen_ucret)
@@ -1258,7 +1363,7 @@ class AlisverisDialog(OrtalanmisDialog):
                 self.sepet_alani.addWidget(kutu)
             self.sepet_alani.addStretch()
 
-        self.urun_sayfasi_toplam_lbl.setText(f"Toplam: {self._sepet_toplami():.0f} ₺")
+        self.urun_sayfasi_toplam_lbl.setText(f"Toplam: {tl(self._sepet_toplami())} ₺")
 
     def _odemeye_gec(self):
         if not self.sepet:
@@ -1283,7 +1388,7 @@ class AlisverisDialog(OrtalanmisDialog):
                 w.deleteLater()
 
         toplam_ham = self._sepet_toplami()
-        self.toplam_lbl = QLabel(f"Ödenecek: {odenecek_tutar(toplam_ham, self.indirim)} ₺")
+        self.toplam_lbl = QLabel(f"Ödenecek: {tl(odenecek_tutar(toplam_ham, self.indirim))} ₺")
         self.toplam_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.toplam_lbl.setStyleSheet(f"font-size:22px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
         layout.addWidget(self.toplam_lbl)
@@ -1356,7 +1461,7 @@ class AlisverisDialog(OrtalanmisDialog):
         self.indirim = self.indirim_spin.value()
         self.state.masasiz_indirim = self.indirim
         toplam_ham = self._sepet_toplami()
-        self.toplam_lbl.setText(f"Ödenecek: {odenecek_tutar(toplam_ham, self.indirim)} ₺")
+        self.toplam_lbl.setText(f"Ödenecek: {tl(odenecek_tutar(toplam_ham, self.indirim))} ₺")
         self._kalan_guncelle()
 
     def _kalan_guncelle(self):
@@ -1365,10 +1470,10 @@ class AlisverisDialog(OrtalanmisDialog):
         kalan = toplam - girilen
         ortak_stil = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         if kalan > 0:
-            self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
+            self.kalan_lbl.setText(f"Kalan: {tl(kalan)} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#f5a623; {ortak_stil}")
         elif kalan < 0:
-            self.kalan_lbl.setText(f"Para Üstü: {abs(kalan):.0f} ₺")
+            self.kalan_lbl.setText(f"Para Üstü: {tl(abs(kalan))} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak_stil}")
         else:
             self.kalan_lbl.setText("Tam ödendi ✓")
@@ -1444,9 +1549,13 @@ class MasaDetayDialog(OrtalanmisDialog):
         ad_lbl = QLabel(masa.ad)
         ad_lbl.setStyleSheet("color:#6B6F7A; font-size:11px; font-weight:700; background:transparent; letter-spacing:1px;")
         ukv.addWidget(ad_lbl)
-        tutar_lbl = QLabel(f"{masa.guncel_masa_ucreti()} ₺")
+        tutar_lbl = QLabel(f"{tl(masa.guncel_masa_ucreti())} ₺")
         tutar_lbl.setStyleSheet("color:#00E676; font-size:28px; font-weight:800; background:transparent;")
         ukv.addWidget(tutar_lbl)
+        if masa.aktarilan_ucretler:
+            akt_lbl = QLabel(f"+ {tl(masa.aktarilan_toplami())} ₺ aktarılan masa ücreti")
+            akt_lbl.setStyleSheet("color:#6B6F7A; font-size:11px; font-weight:700; background:transparent;")
+            ukv.addWidget(akt_lbl)
         v.addWidget(ust_kart)
 
         # --- Ürünler kartı: başlıkta TOPLAM ürün tutarı, her satırda adet VE
@@ -1455,7 +1564,7 @@ class MasaDetayDialog(OrtalanmisDialog):
         urun_kart.setObjectName("masaKart")
         ukv2 = QVBoxLayout(urun_kart)
         urun_toplami = sum(u.toplam for u in masa.urunler)
-        urun_baslik = QLabel(f"🛒  Ürünler  —  {urun_toplami:.0f} ₺")
+        urun_baslik = QLabel(f"🛒  Ürünler  —  {tl(urun_toplami)} ₺")
         urun_baslik.setStyleSheet(f"font-size:13px; font-weight:800; color:{RENK['text']};")
         ukv2.addWidget(urun_baslik)
         if masa.urunler:
@@ -1465,7 +1574,7 @@ class MasaDetayDialog(OrtalanmisDialog):
                 ad.setStyleSheet(f"font-size:12px; color:{RENK['text']}; font-weight:600;")
                 satir.addWidget(ad)
                 satir.addStretch()
-                birim = QLabel(f"{u.birim_fiyat:.0f} ₺/adet")
+                birim = QLabel(f"{tl(u.birim_fiyat)} ₺/adet")
                 birim.setStyleSheet(f"font-size:11px; color:{RENK['text_muted']}; font-weight:600;")
                 satir.addWidget(birim)
                 ukv2.addLayout(satir)
@@ -1474,6 +1583,26 @@ class MasaDetayDialog(OrtalanmisDialog):
             bos.setStyleSheet(f"font-size:12px; color:{RENK['text_muted']};")
             ukv2.addWidget(bos)
         v.addWidget(urun_kart)
+
+        # --- Başka masalardan aktarılan ücretler ---
+        if masa.aktarilan_ucretler:
+            akt_kart = QFrame()
+            akt_kart.setObjectName("masaKart")
+            akv = QVBoxLayout(akt_kart)
+            akt_baslik = QLabel(f"↪  Aktarılan Masa Ücretleri  —  {tl(masa.aktarilan_toplami())} ₺")
+            akt_baslik.setStyleSheet(f"font-size:13px; font-weight:800; color:{RENK['text']};")
+            akv.addWidget(akt_baslik)
+            for a in masa.aktarilan_ucretler:
+                satir = QHBoxLayout()
+                ad = QLabel(f"{a.kaynak_masa} masasının ücreti")
+                ad.setStyleSheet(f"font-size:12px; color:{RENK['text']}; font-weight:600;")
+                satir.addWidget(ad)
+                satir.addStretch()
+                tt = QLabel(f"{tl(a.tutar)} ₺")
+                tt.setStyleSheet(f"font-size:12px; color:{RENK['text']}; font-weight:700;")
+                satir.addWidget(tt)
+                akv.addLayout(satir)
+            v.addWidget(akt_kart)
 
         # --- Kol/Tarife değişim geçmişi kartı ---
         gecmis_kart = QFrame()

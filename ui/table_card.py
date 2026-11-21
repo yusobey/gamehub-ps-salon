@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QHBoxLayou
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QSize
 from PyQt6.QtGui import QFont, QDrag
 
+from core.bicim import tl
 from core.models import Masa, MasaDurumu
 from core.theme import durum_rengi, durum_zemin_rengi, RENK
 
@@ -283,4 +284,4 @@ class MasaKarti(QFrame):
         baslama = m.toplam_baslangic_zamani()
         self.baslama_lbl.setText(f"Başlangıç: {baslama.strftime('%H:%M')}" if baslama else "")
 
-        self.tutar_lbl.setText(f"{m.genel_toplam()} ₺")
+        self.tutar_lbl.setText(f"{tl(m.genel_toplam())} ₺")

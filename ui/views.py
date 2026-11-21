@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QDate, QSize
 from PyQt6.QtGui import QPalette, QColor
 from datetime import datetime, date, timedelta
 
+from core.bicim import tl
 from core.models import AppState, Masa, MasaDurumu, Borc, KasaIslemi, Gider, Avans, Not, is_gunu, next_id, round_up_5
 from core.pricing import round_up_5 as rd5, para_ustunu_dagitimdan_dus
 from core.theme import RENK, durum_rengi, durum_zemin_rengi, kaynak_yolu
@@ -289,7 +290,7 @@ class AlisverisKarti(QFrame):
         kapalıyken bile ne kadar sepette olduğu Anasayfa'dan görülebilir."""
         toplam = sum(v["adet"] * v["birim_fiyat"] for v in sepet.values())
         if toplam > 0:
-            self.alt_lbl.setText(f"{toplam:.0f} ₺ sepette")
+            self.alt_lbl.setText(f"{tl(toplam)} ₺ sepette")
         else:
             self.alt_lbl.setText("Masasız Satış")
 
@@ -620,8 +621,9 @@ class HomeView(QWidget):
                 id=next_id(), masa_adi=masa.ad, toplam_tutar=0.0,
                 odeme_dagilimi={}, zaman=datetime.now(),
                 acilis_zamani=masa.segments[0].start_time if masa.segments else None,
-                masa_ucreti=masa.guncel_masa_ucreti(),
+                masa_ucreti=masa.guncel_masa_ucreti() + masa.aktarilan_toplami(),
                 urunler=[{"ad": u.urun_adi, "adet": u.adet, "birim_fiyat": u.birim_fiyat} for u in masa.urunler],
+                aktarilanlar=[{"kaynak": a.kaynak_masa, "tutar": a.tutar} for a in masa.aktarilan_ucretler],
                 iptal_nedeni=sebep,
             )
             self.state.kasa_islemleri.append(islem)
@@ -711,7 +713,7 @@ class _BorcDetayDialog(OrtalanmisDialog):
         ad_lbl = QLabel(f"👤 {borc.ad_soyad}")
         ad_lbl.setStyleSheet("color:#8A6A1A; font-size:12px; font-weight:800; background:transparent;")
         ukv.addWidget(ad_lbl)
-        tutar_lbl = QLabel(f"{borc.tutar:.0f} ₺")
+        tutar_lbl = QLabel(f"{tl(borc.tutar)} ₺")
         tutar_lbl.setStyleSheet(f"color:{RENK['warning']}; font-size:28px; font-weight:800; background:transparent;")
         ukv.addWidget(tutar_lbl)
         v.addWidget(ust_kart)
@@ -732,25 +734,28 @@ class _BorcDetayDialog(OrtalanmisDialog):
                 kv.addWidget(self._satir("🟢 Açılış", tarih_okunakli(islem.acilis_zamani)))
             kv.addWidget(self._satir("🔴 Kapanış", tarih_okunakli(islem.zaman)))
             kv.addWidget(self._ayirici())
-            kv.addWidget(self._satir("Masa Ücreti", f"{islem.masa_ucreti:.0f} ₺"))
+            _akt = islem.aktarilanlar or []
+            kv.addWidget(self._satir("Masa Ücreti", f"{tl(islem.masa_ucreti - sum(a.get('tutar', 0) for a in _akt))} ₺"))
+            for a in _akt:
+                kv.addWidget(self._satir(f"↪ {a.get('kaynak', '?')} masasının ücreti", f"{tl(a.get('tutar', 0))} ₺"))
             if islem.urunler:
                 urun_baslik = QLabel("🛒  Market / Ürünler")
                 urun_baslik.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['text']}; margin-top:6px;")
                 kv.addWidget(urun_baslik)
                 for u in islem.urunler:
-                    kv.addWidget(self._satir(f"{u['ad']}  ×{u['adet']}", f"{u['adet'] * u['birim_fiyat']:.0f} ₺"))
+                    kv.addWidget(self._satir(f"{u['ad']}  ×{u['adet']}", f"{tl(u['adet'] * u['birim_fiyat'])} ₺"))
             else:
                 bos = QLabel("Market satışı yok")
                 bos.setStyleSheet(f"color:{RENK['text_muted']}; font-size:12px; margin-top:4px;")
                 kv.addWidget(bos)
             if islem.indirim_tutari:
-                kv.addWidget(self._satir("İndirim", f"-{islem.indirim_tutari:.0f} ₺"))
+                kv.addWidget(self._satir("İndirim", f"-{tl(islem.indirim_tutari)} ₺"))
             kv.addWidget(self._ayirici())
-            kv.addWidget(self._satir("Satış Toplamı", f"{islem.toplam_tutar:.0f} ₺", kalin=True))
+            kv.addWidget(self._satir("Satış Toplamı", f"{tl(islem.toplam_tutar)} ₺", kalin=True))
             pesin = [(ad, t) for ad, t in odeme_kalemleri(islem.odeme_dagilimi) if ad != "Borç"]
             for ad, t in pesin:
-                kv.addWidget(self._satir(f"Ödenen ({ad})", f"{t:.0f} ₺"))
-            kv.addWidget(self._satir("Borca Yazılan", f"{borc.tutar:.0f} ₺", kalin=True))
+                kv.addWidget(self._satir(f"Ödenen ({ad})", f"{tl(t)} ₺"))
+            kv.addWidget(self._satir("Borca Yazılan", f"{tl(borc.tutar)} ₺", kalin=True))
         v.addWidget(kart)
 
         kapat_btn = QPushButton("Kapat")
@@ -857,11 +862,11 @@ class BorclarView(QWidget):
         secililer = [b for b in acik_borclar if b.id in self._secili]
         if secililer:
             toplam = sum(b.tutar for b in secililer)
-            self.toplam_lbl.setText(f"Seçili {len(secililer)} borç:  {toplam:.0f} ₺")
+            self.toplam_lbl.setText(f"Seçili {len(secililer)} borç:  {tl(toplam)} ₺")
             self.ipucu_lbl.setText("")
         else:
             toplam = sum(b.tutar for b in acik_borclar)
-            self.toplam_lbl.setText(f"Tüm açık borçlar ({len(acik_borclar)}):  {toplam:.0f} ₺")
+            self.toplam_lbl.setText(f"Tüm açık borçlar ({len(acik_borclar)}):  {tl(toplam)} ₺")
             self.ipucu_lbl.setText(
                 "Kartlara tıklayarak seçin  •  Kişi bazlı döküm ve toplu ödeme için sağdaki toplama tıklayın"
                 if acik_borclar else "")
@@ -936,7 +941,7 @@ class BorclarView(QWidget):
         v.addStretch()
 
         # --- Orta: büyük, dikkat çeken tutar ---
-        tutar_lbl = QLabel(f"{borc.tutar:.0f} ₺")
+        tutar_lbl = QLabel(f"{tl(borc.tutar)} ₺")
         tutar_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tutar_lbl.setStyleSheet(f"font-size:22px; font-weight:800; color:{RENK['warning']};")
         v.addWidget(tutar_lbl)
@@ -1061,7 +1066,7 @@ class _KisiBorclariDialog(OrtalanmisDialog):
                 w.deleteLater()
         kisiler = self.kisiler()
         toplam = sum(k[2] for k in kisiler)
-        self.ozet_lbl.setText(f"{len(kisiler)} kişi  •  Toplam açık borç: {toplam:.0f} ₺")
+        self.ozet_lbl.setText(f"{len(kisiler)} kişi  •  Toplam açık borç: {tl(toplam)} ₺")
         if not kisiler:
             self.liste.addWidget(QLabel("Açık borç kalmadı ✓"))
             return
@@ -1079,7 +1084,7 @@ class _KisiBorclariDialog(OrtalanmisDialog):
             n.setStyleSheet(f"font-size:10px; color:{RENK['text_muted']};")
             sol.addWidget(n)
             h.addLayout(sol, 1)
-            t = QLabel(f"{tutar:.0f} ₺")
+            t = QLabel(f"{tl(tutar)} ₺")
             t.setStyleSheet(f"font-size:16px; font-weight:800; color:{RENK['warning']};")
             h.addWidget(t)
             btn = QPushButton("Toplu Öde")
@@ -1123,7 +1128,7 @@ class _TopluBorcOdemeDialog(OrtalanmisDialog):
         self.kutular: list[tuple[QCheckBox, Borc]] = []
         for b in sorted(borclar, key=lambda x: x.olusturma_zamani):
             kaynak = f"  •  {b.kaynak_masa_adi}" if b.kaynak_masa_adi else ""
-            cb = QCheckBox(f"{tarih_okunakli(b.olusturma_zamani)}{kaynak}  —  {b.tutar:.0f} ₺")
+            cb = QCheckBox(f"{tarih_okunakli(b.olusturma_zamani)}{kaynak}  —  {tl(b.tutar)} ₺")
             cb.setChecked(True)
             cb.toggled.connect(self._hesapla)
             v.addWidget(cb)
@@ -1172,15 +1177,15 @@ class _TopluBorcOdemeDialog(OrtalanmisDialog):
     def _hesapla(self, *_):
         hedef = self._hedef()
         adet = sum(1 for cb, _b in self.kutular if cb.isChecked())
-        self.tutar_lbl.setText(f"Ödenecek ({adet} borç): {hedef:.0f} ₺")
+        self.tutar_lbl.setText(f"Ödenecek ({adet} borç): {tl(hedef)} ₺")
         girilen = sum(s.value() for s in self.inputs.values())
         kalan = hedef - girilen
         ortak = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         if kalan > 0:
-            self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
+            self.kalan_lbl.setText(f"Kalan: {tl(kalan)} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#f5a623; {ortak}")
         elif kalan < 0:
-            self.kalan_lbl.setText(f"Para Üstü: {abs(kalan):.0f} ₺")
+            self.kalan_lbl.setText(f"Para Üstü: {tl(abs(kalan))} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak}")
         else:
             self.kalan_lbl.setText("Tam ödendi ✓" if hedef > 0 else "Borç seçilmedi")
@@ -1215,7 +1220,7 @@ class _BorcOdemeDialog(OrtalanmisDialog):
         v = QVBoxLayout(self)
         v.setSpacing(10)
 
-        tutar_lbl = QLabel(f"Borç Tutarı: {borc.tutar:.0f} ₺")
+        tutar_lbl = QLabel(f"Borç Tutarı: {tl(borc.tutar)} ₺")
         tutar_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tutar_lbl.setStyleSheet(f"font-size:20px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
         v.addWidget(tutar_lbl)
@@ -1263,10 +1268,10 @@ class _BorcOdemeDialog(OrtalanmisDialog):
         kalan = self.borc.tutar - girilen
         ortak_stil = "font-size:15px; font-weight:800; background:transparent; border:none; margin-top:4px;"
         if kalan > 0:
-            self.kalan_lbl.setText(f"Kalan: {kalan:.0f} ₺")
+            self.kalan_lbl.setText(f"Kalan: {tl(kalan)} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#f5a623; {ortak_stil}")
         elif kalan < 0:
-            self.kalan_lbl.setText(f"Para Üstü: {abs(kalan):.0f} ₺")
+            self.kalan_lbl.setText(f"Para Üstü: {tl(abs(kalan))} ₺")
             self.kalan_lbl.setStyleSheet(f"color:#2ecc71; {ortak_stil}")
         else:
             self.kalan_lbl.setText("Tam ödendi ✓")
@@ -2158,7 +2163,7 @@ class UrunYonetDialog(OrtalanmisDialog):
     def _ana_menu(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        v.addWidget(QLabel(f"{self.urun_adi}  ·  {self._urun()['fiyat']:.0f} ₺"))
+        v.addWidget(QLabel(f"{self.urun_adi}  ·  {tl(self._urun()['fiyat'])} ₺"))
 
         duzenle_btn = QPushButton("✏️ Düzenle")
         duzenle_btn.setObjectName("secenekBtn")
@@ -2284,7 +2289,7 @@ class UrunKarti(QFrame):
         ad_lbl.setStyleSheet("font-size:12px; font-weight:600;")
         v.addWidget(ad_lbl)
 
-        fiyat_lbl = QLabel(f"{fiyat:.0f} ₺")
+        fiyat_lbl = QLabel(f"{tl(fiyat)} ₺")
         fiyat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fiyat_lbl.setStyleSheet(f"font-size:12px; font-weight:700; color:{RENK['accent']};")
         v.addWidget(fiyat_lbl)
@@ -2619,7 +2624,7 @@ class AnlikSalonSayfasi(QWidget):
 
         aktifler = [m for m in self.state.masalar if m.durum != MasaDurumu.BOS]
         toplam = sum(m.genel_toplam() for m in aktifler)
-        self.toplam_lbl.setText(f"{toplam:.0f} ₺")
+        self.toplam_lbl.setText(f"{tl(toplam)} ₺")
 
         if not aktifler:
             bos_lbl = QLabel("Şu an açık masa yok.")
@@ -2647,7 +2652,7 @@ class AnlikSalonSayfasi(QWidget):
             )
             sh.addWidget(durum_lbl)
             sh.addStretch()
-            tutar_lbl = QLabel(f"{m.genel_toplam():.0f} ₺")
+            tutar_lbl = QLabel(f"{tl(m.genel_toplam())} ₺")
             tutar_lbl.setStyleSheet(f"font-size:15px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
             sh.addWidget(tutar_lbl)
             self.liste_v.addWidget(satir)
@@ -2872,9 +2877,9 @@ class GunSonuSayfasi(QWidget):
             f"{baslangic.strftime('%d.%m.%Y %H:%M')} - {bitis.strftime('%d.%m.%Y %H:%M')} arası"
         )
 
-        self.ciro_lbl.setText(f"{ozet['ciro']:.0f} ₺")
-        self.gider_lbl.setText(f"{ozet['gider']:.0f} ₺")
-        self.net_lbl.setText(f"{ozet['net']:.0f} ₺")
+        self.ciro_lbl.setText(f"{tl(ozet['ciro'])} ₺")
+        self.gider_lbl.setText(f"{tl(ozet['gider'])} ₺")
+        self.net_lbl.setText(f"{tl(ozet['net'])} ₺")
 
         # masa bazlı
         while self.masa_v.count():
@@ -2887,12 +2892,12 @@ class GunSonuSayfasi(QWidget):
         baslik_lbl.setStyleSheet(f"font-weight:800; font-size:13px; color:{RENK['text']};")
         self.masa_v.addWidget(baslik_lbl)
         if ozet["toplam_indirim"] > 0:
-            indirim_lbl = QLabel(f"💸 Bugün yapılan toplam indirim: {ozet['toplam_indirim']:.0f} ₺")
+            indirim_lbl = QLabel(f"💸 Bugün yapılan toplam indirim: {tl(ozet['toplam_indirim'])} ₺")
             indirim_lbl.setStyleSheet(f"color:{RENK['danger']}; font-size:10px; font-weight:700;")
             self.masa_v.addWidget(indirim_lbl)
         if ozet["en_cok_kazandiran"]:
             en_cok_ad, en_cok_tutar = ozet["en_cok_kazandiran"]
-            en_cok_lbl = QLabel(f"🏆 En çok kazandıran: {en_cok_ad} ({en_cok_tutar:.0f} ₺)")
+            en_cok_lbl = QLabel(f"🏆 En çok kazandıran: {en_cok_ad} ({tl(en_cok_tutar)} ₺)")
             en_cok_lbl.setStyleSheet(f"color:{RENK['accent']}; font-size:11px; font-weight:700;")
             en_cok_lbl.setWordWrap(True)
             self.masa_v.addWidget(en_cok_lbl)
@@ -2912,11 +2917,11 @@ class GunSonuSayfasi(QWidget):
             ad_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['text']}; background:transparent;")
             ust.addWidget(ad_lbl)
             ust.addStretch()
-            tutar_lbl = QLabel(f"{veri['toplam']:.0f} ₺")
+            tutar_lbl = QLabel(f"{tl(veri['toplam'])} ₺")
             tutar_lbl.setStyleSheet(f"font-size:14px; font-weight:800; color:{RENK['accent']}; background:transparent;")
             ust.addWidget(tutar_lbl)
             kv2.addLayout(ust)
-            detay_lbl = QLabel(f"🎮 Masa: {veri['masa_ucreti']:.0f} ₺   🛍️ Market: {veri['urun_geliri']:.0f} ₺")
+            detay_lbl = QLabel(f"🎮 Masa: {tl(veri['masa_ucreti'])} ₺   🛍️ Market: {tl(veri['urun_geliri'])} ₺")
             detay_lbl.setStyleSheet(f"font-size:11px; font-weight:700; color:{RENK['text']}; background:transparent;")
             kv2.addWidget(detay_lbl)
             self.masa_v.addWidget(kutu)
@@ -2928,7 +2933,7 @@ class GunSonuSayfasi(QWidget):
             if w:
                 w.setParent(None)  # HEMEN kopar - deleteLater() gecikmeli
                 w.deleteLater()
-        u_baslik = QLabel(f"🛒  Satılan Ürünler  —  {ozet['toplam_urun_geliri']:.0f} ₺")
+        u_baslik = QLabel(f"🛒  Satılan Ürünler  —  {tl(ozet['toplam_urun_geliri'])} ₺")
         u_baslik.setStyleSheet(f"font-weight:800; font-size:13px; color:{RENK['text']};")
         self.urun_v.addWidget(u_baslik)
         if not ozet["urun_bazli"]:
@@ -2946,7 +2951,7 @@ class GunSonuSayfasi(QWidget):
             ad_lbl.setStyleSheet(f"font-size:12px; font-weight:700; color:{RENK['text_muted']}; background:transparent;")
             kh.addWidget(ad_lbl)
             kh.addStretch()
-            tutar_lbl = QLabel(f"{veri['tutar']:.0f} ₺")
+            tutar_lbl = QLabel(f"{tl(veri['tutar'])} ₺")
             tutar_lbl.setStyleSheet(f"font-size:14px; font-weight:800; color:{RENK['text']}; background:transparent;")
             kh.addWidget(tutar_lbl)
             # ÖNEMLİ: addLayout değil addWidget - aynı "hayalet metin" hatasını
@@ -2960,7 +2965,7 @@ class GunSonuSayfasi(QWidget):
         # duruyordu). Artık üstteki özet satırında KENDİ ayrı karti_btnnda.
         self._son_masa_disi_urunler = ozet["masa_disi_urun_bazli"]
         self._son_masa_disi_toplam = ozet["masa_disi_satis_toplami"]
-        self.masa_disi_lbl.setText(f"{ozet['masa_disi_satis_toplami']:.0f} ₺")
+        self.masa_disi_lbl.setText(f"{tl(ozet['masa_disi_satis_toplami'])} ₺")
 
         # ödeme yöntemleri - her biri KENDİ küçük çerçeveli çipinde, ikonlu,
         # koyu ve büyük puntolu tutar
@@ -2989,7 +2994,7 @@ class GunSonuSayfasi(QWidget):
             ikon_ad.setStyleSheet(f"font-size:12px; font-weight:700; color:{RENK['text_muted']}; background:transparent;")
             ch.addWidget(ikon_ad)
             ch.addStretch()
-            tutar_lbl = QLabel(f"{tutar:.0f} ₺")
+            tutar_lbl = QLabel(f"{tl(tutar)} ₺")
             tutar_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             # SABİT genişlik: 100 TL ile 2500 TL aynı büyüklükteki kutuya
             # girsin - eskiden etiket metne göre doğal genişlikte olduğu
@@ -3002,7 +3007,7 @@ class GunSonuSayfasi(QWidget):
 
         if ozet["borc_tahsilati_toplam"] > 0:
             tahsilat_lbl = QLabel(
-                f"(+ bu gün tahsil edilen eski borç: {ozet['borc_tahsilati_toplam']:.0f} ₺ - ciroya dahil değil)"
+                f"(+ bu gün tahsil edilen eski borç: {tl(ozet['borc_tahsilati_toplam'])} ₺ - ciroya dahil değil)"
             )
             tahsilat_lbl.setStyleSheet(f"color:{RENK['text_muted']}; font-size:10px; margin-top:4px;")
             tahsilat_lbl.setWordWrap(True)
@@ -3052,7 +3057,7 @@ class GunSonuSayfasi(QWidget):
         bilgi_lbl.setStyleSheet("font-size:12px; background:transparent; border:none;")
         bilgi_lbl.setWordWrap(True)  # dar sütunda uzun açıklama alt satıra insin
         sh.addWidget(bilgi_lbl, 1)
-        tutar_lbl = QLabel(f"{avans.tutar:.0f} ₺")
+        tutar_lbl = QLabel(f"{tl(avans.tutar)} ₺")
         tutar_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['accent2']}; background:transparent; border:none;")
         sh.addWidget(tutar_lbl)
         duzenle_btn = QPushButton("✏️")
@@ -3100,7 +3105,7 @@ class GunSonuSayfasi(QWidget):
         baslik = QLabel("🛍️  MASA DIŞI SATIŞ")
         baslik.setStyleSheet("color:#6B6F7A; font-size:11px; font-weight:700; background:transparent; letter-spacing:1px;")
         ukv.addWidget(baslik)
-        tutar_lbl = QLabel(f"{toplam:.0f} ₺")
+        tutar_lbl = QLabel(f"{tl(toplam)} ₺")
         tutar_lbl.setStyleSheet("color:#00E676; font-size:24px; font-weight:800; background:transparent;")
         ukv.addWidget(tutar_lbl)
         v.addWidget(ust_kart)
@@ -3116,7 +3121,7 @@ class GunSonuSayfasi(QWidget):
             ad_lbl.setStyleSheet(f"font-size:12px; font-weight:700; color:{RENK['text']}; background:transparent;")
             satir.addWidget(ad_lbl)
             satir.addStretch()
-            tutar_urun_lbl = QLabel(f"{veri['tutar']:.0f} ₺")
+            tutar_urun_lbl = QLabel(f"{tl(veri['tutar'])} ₺")
             tutar_urun_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['accent']}; background:transparent;")
             satir.addWidget(tutar_urun_lbl)
             v.addLayout(satir)
@@ -3172,7 +3177,7 @@ class GunSonuSayfasi(QWidget):
         bilgi_lbl.setStyleSheet("font-size:12px; background:transparent; border:none;")
         bilgi_lbl.setWordWrap(True)  # dar sütunda uzun açıklama alt satıra insin
         sh.addWidget(bilgi_lbl, 1)
-        tutar_lbl = QLabel(f"{gider.tutar:.0f} ₺")
+        tutar_lbl = QLabel(f"{tl(gider.tutar)} ₺")
         tutar_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['danger']}; background:transparent; border:none;")
         sh.addWidget(tutar_lbl)
         duzenle_btn = QPushButton("✏️")
@@ -3310,6 +3315,7 @@ class GenelRaporSayfasi(QWidget):
             # DEĞİŞTİRMİYOR, sadece cironun ne kadarının ürün satışından
             # geldiğini kullanıcıya ayrıca gösteriyor (çift sayım YOK).
             ay_market = sum(self.state.gun_ozet(g)["toplam_urun_geliri"] for g in ay_gunleri)
+            ay_ort, ay_gun_sayisi = self.state.ay_net_ortalamasi(yil, ay)
 
             # --- Ay "klasörü": masaüstü dosya/klasör simgesi gibi, sarımsı
             # amber tonlu, belirgin bir kart ---
@@ -3333,8 +3339,9 @@ class GenelRaporSayfasi(QWidget):
             bh = QHBoxLayout(baslik_kutu)
             bh.setContentsMargins(0, 0, 0, 0)
             baslik_lbl = QLabel(
-                f"{'📂' if acik else '🗀'}  {self.AY_ADLARI[ay-1]} {yil}   ·   Ciro: {ay_ciro:.0f} ₺   ·   Market: {ay_market:.0f} ₺   ·   Gider: {ay_gider:.0f} ₺   ·   Net: {ay_net:.0f} ₺"
+                f"{'📂' if acik else '🗀'}  {self.AY_ADLARI[ay-1]} {yil}   ·   Ciro: {tl(ay_ciro)} ₺   ·   Market: {tl(ay_market)} ₺   ·   Gider: {tl(ay_gider)} ₺   ·   Net: {tl(ay_net)} ₺   ·   Ortalama: {tl(ay_ort)} ₺/gün"
             )
+            baslik_lbl.setToolTip(f"Ortalama = {self.AY_ADLARI[ay-1]} {yil} net toplamı ÷ {ay_gun_sayisi} gün")
             baslik_lbl.setStyleSheet(
                 "background:transparent; font-weight:800; font-size:14px; color:#8A6A1A;"
             )
@@ -3383,7 +3390,7 @@ class GenelRaporSayfasi(QWidget):
                     )
                     toplam = sum(g.tutar for g in eslesenler)
                     sonuc_baslik = QLabel(
-                        f"'{metin.strip()}' için {len(eslesenler)} sonuç, toplam {toplam:.0f} ₺ "
+                        f"'{metin.strip()}' için {len(eslesenler)} sonuç, toplam {tl(toplam)} ₺ "
                         f"({self.AY_ADLARI[ay-1]} {yil})"
                     )
                     sonuc_baslik.setStyleSheet(f"font-weight:800; font-size:12px; color:{RENK['text']}; background:transparent;")
@@ -3405,7 +3412,7 @@ class GenelRaporSayfasi(QWidget):
                         bilgi_lbl.setStyleSheet("font-size:12px; background:transparent; border:none;")
                         sh.addWidget(bilgi_lbl)
                         sh.addStretch()
-                        tutar_lbl = QLabel(f"{gider.tutar:.0f} ₺")
+                        tutar_lbl = QLabel(f"{tl(gider.tutar)} ₺")
                         tutar_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['danger']}; background:transparent; border:none;")
                         sh.addWidget(tutar_lbl)
                         sonuc_v.addWidget(satir)
@@ -3427,16 +3434,16 @@ class GenelRaporSayfasi(QWidget):
                     tarih_lbl.setStyleSheet(f"font-size:12px; font-weight:700; color:{RENK['text']}; background:transparent;")
                     gh.addWidget(tarih_lbl)
                     gh.addStretch()
-                    ciro_lbl = QLabel(f"Ciro: {gun_ozet['ciro']:.0f} ₺")
+                    ciro_lbl = QLabel(f"Ciro: {tl(gun_ozet['ciro'])} ₺")
                     ciro_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['accent2']}; background:transparent;")
                     gh.addWidget(ciro_lbl)
-                    market_lbl = QLabel(f"Market: {gun_ozet['toplam_urun_geliri']:.0f} ₺")
+                    market_lbl = QLabel(f"Market: {tl(gun_ozet['toplam_urun_geliri'])} ₺")
                     market_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['info']}; background:transparent; margin-left:14px;")
                     gh.addWidget(market_lbl)
-                    gider_lbl = QLabel(f"Gider: {gun_ozet['gider']:.0f} ₺")
+                    gider_lbl = QLabel(f"Gider: {tl(gun_ozet['gider'])} ₺")
                     gider_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['danger']}; background:transparent; margin-left:14px;")
                     gh.addWidget(gider_lbl)
-                    net_lbl = QLabel(f"Net: {gun_ozet['net']:.0f} ₺")
+                    net_lbl = QLabel(f"Net: {tl(gun_ozet['net'])} ₺")
                     net_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['accent']}; background:transparent; margin-left:14px;")
                     gh.addWidget(net_lbl)
                     # Ay başlığıyla TUTARLI olsun diye burası da ÇİFT TIK.
@@ -3653,11 +3660,14 @@ class _SonIslemDetayDialog(OrtalanmisDialog):
         ad_lbl = QLabel(islem.masa_adi)
         ad_lbl.setStyleSheet("color:#6B6F7A; font-size:11px; font-weight:700; background:transparent; letter-spacing:1px;")
         ukv.addWidget(ad_lbl)
-        if islem.iptal_nedeni:
+        if islem.aktarim_hedef:
+            toplam_lbl = QLabel(f"↪ {islem.aktarim_hedef} MASASINA AKTARILDI")
+            toplam_lbl.setStyleSheet(f"color:{RENK['accent']}; font-size:18px; font-weight:800; background:transparent;")
+        elif islem.iptal_nedeni:
             toplam_lbl = QLabel("❌ İPTAL EDİLDİ")
             toplam_lbl.setStyleSheet(f"color:{RENK['danger']}; font-size:22px; font-weight:800; background:transparent;")
         else:
-            toplam_lbl = QLabel(f"{islem.toplam_tutar:.0f} ₺")
+            toplam_lbl = QLabel(f"{tl(islem.toplam_tutar)} ₺")
             toplam_lbl.setStyleSheet("color:#00E676; font-size:28px; font-weight:800; background:transparent;")
         ukv.addWidget(toplam_lbl)
         v.addWidget(ust_kart)
@@ -3666,7 +3676,7 @@ class _SonIslemDetayDialog(OrtalanmisDialog):
             sebep_kart = QFrame()
             sebep_kart.setObjectName("masaKart")
             skv = QVBoxLayout(sebep_kart)
-            sebep_baslik = QLabel("📝  İptal Sebebi")
+            sebep_baslik = QLabel("📝  Açıklama" if islem.aktarim_hedef else "📝  İptal Sebebi")
             sebep_baslik.setStyleSheet(f"font-size:13px; font-weight:800; color:{RENK['text']};")
             skv.addWidget(sebep_baslik)
             sebep_metin = QLabel(islem.iptal_nedeni)
@@ -3682,7 +3692,11 @@ class _SonIslemDetayDialog(OrtalanmisDialog):
         dkv = QVBoxLayout(detay_kart)
         dkv.setSpacing(7)
         dkv.setContentsMargins(12, 12, 12, 12)
-        dkv.addWidget(self._satir("Masa Ücreti", f"{islem.masa_ucreti:.0f} ₺"))
+        aktarilanlar = islem.aktarilanlar or []
+        aktarilan_toplam = sum(a.get("tutar", 0) for a in aktarilanlar)
+        dkv.addWidget(self._satir("Masa Ücreti", f"{tl(islem.masa_ucreti - aktarilan_toplam)} ₺"))
+        for a in aktarilanlar:
+            dkv.addWidget(self._satir(f"↪ {a.get('kaynak', '?')} masasının ücreti", f"{tl(a.get('tutar', 0))} ₺"))
 
         if islem.urunler:
             urun_baslik = QLabel("🛒  Ürünler")
@@ -3690,14 +3704,14 @@ class _SonIslemDetayDialog(OrtalanmisDialog):
             dkv.addWidget(urun_baslik)
             for u in islem.urunler:
                 toplam = u["adet"] * u["birim_fiyat"]
-                dkv.addWidget(self._satir(f"{u['ad']}  ×{u['adet']}", f"{toplam:.0f} ₺"))
+                dkv.addWidget(self._satir(f"{u['ad']}  ×{u['adet']}", f"{tl(toplam)} ₺"))
         else:
             bos_lbl = QLabel("Ürün satışı yok")
             bos_lbl.setStyleSheet(f"color:{RENK['text_muted']}; font-size:12px; margin-top:4px;")
             dkv.addWidget(bos_lbl)
 
         if islem.indirim_tutari and not islem.iptal_nedeni:
-            indirim_satir = self._satir("💸 İndirim", f"-{islem.indirim_tutari:.0f} ₺")
+            indirim_satir = self._satir("💸 İndirim", f"-{tl(islem.indirim_tutari)} ₺")
             for lbl in indirim_satir.findChildren(QLabel)[1:]:
                 lbl.setStyleSheet(f"font-size:13px; color:{RENK['danger']}; font-weight:800; background:transparent; border:none;")
             dkv.addWidget(indirim_satir)
@@ -3708,7 +3722,7 @@ class _SonIslemDetayDialog(OrtalanmisDialog):
             odeme_baslik.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['text']}; margin-top:6px;")
             dkv.addWidget(odeme_baslik)
             for ad, tutar in odemeler:
-                dkv.addWidget(self._satir(ad, f"{tutar:.0f} ₺"))
+                dkv.addWidget(self._satir(ad, f"{tl(tutar)} ₺"))
 
         ayirici = QFrame()
         ayirici.setFrameShape(QFrame.Shape.HLine)
@@ -3874,7 +3888,7 @@ class SonIslemlerView(QWidget):
             sh = QHBoxLayout(satir)
             sh.setContentsMargins(14, 4, 14, 4)
 
-            ikon_kutu = QLabel("❌" if islem.iptal_nedeni else "🎮")
+            ikon_kutu = QLabel("↪" if islem.aktarim_hedef else ("❌" if islem.iptal_nedeni else "🎮"))
             ikon_kutu.setFixedSize(26, 26)
             ikon_kutu.setAlignment(Qt.AlignmentFlag.AlignCenter)
             ikon_kutu.setStyleSheet(
@@ -3902,10 +3916,10 @@ class SonIslemlerView(QWidget):
             sh.addStretch()
 
             if islem.iptal_nedeni:
-                tutar_lbl = QLabel("İptal Edildi")
+                tutar_lbl = QLabel(f"→ {islem.aktarim_hedef}" if islem.aktarim_hedef else "İptal Edildi")
                 tutar_lbl.setStyleSheet(f"font-size:12px; font-weight:800; color:{RENK['danger']}; background:transparent; border:none;")
             else:
-                tutar_lbl = QLabel(f"{islem.toplam_tutar:.0f} ₺")
+                tutar_lbl = QLabel(f"{tl(islem.toplam_tutar)} ₺")
                 tutar_lbl.setStyleSheet(f"font-size:14px; font-weight:800; color:{RENK['accent']}; background:transparent; border:none;")
             tutar_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             # Tutarın altında küçük "Nakit" / "Nakit + Kart" özeti (tutar
