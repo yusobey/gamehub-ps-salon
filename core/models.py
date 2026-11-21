@@ -78,6 +78,15 @@ class UrunSatisi:
 
 
 @dataclass
+class AktarilanUcret:
+    """Başka bir masadan bu masaya aktarılan masa ücreti ("PS 1 masasının ücreti: 125 ₺").
+    tutar zaten 5 TL yuvarlı, nihai tutardır - tekrar hesaplanmaz."""
+    kaynak_masa: str
+    tutar: float
+    zaman: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class KolDegisimKaydi:
     """Detay ekranında gösterilecek: hangi saatte hangi tarifeden hangi tarifeye geçildi."""
     zaman: datetime
@@ -102,6 +111,8 @@ class Masa:
     segments: list[TariffSegment] = field(default_factory=list)
     urunler: list[UrunSatisi] = field(default_factory=list)
     kol_degisim_gecmisi: list[KolDegisimKaydi] = field(default_factory=list)
+    # "Masa Ücretini Başka Masaya Aktar" ile BU masaya gelen ücretler (ödeme bu masadan alınır)
+    aktarilan_ucretler: list[AktarilanUcret] = field(default_factory=list)
 
     acilis_modu: AcilisModu = AcilisModu.NORMAL
     hedef_saniye: float | None = None  # SURE_ILE / TUTAR_ILE için geri sayım hedefi
@@ -127,9 +138,13 @@ class Masa:
     def urun_toplami(self) -> float:
         return sum(u.toplam for u in self.urunler)
 
+    def aktarilan_toplami(self) -> int:
+        """Başka masalardan aktarılan ücretlerin toplamı."""
+        return int(sum(a.tutar for a in self.aktarilan_ucretler))
+
     def genel_toplam(self, now: datetime | None = None) -> int:
-        """Masa ücreti (5 TL yuvarlı) + ürün toplamı (ürünler yuvarlanmaz)."""
-        return self.guncel_masa_ucreti(now) + int(self.urun_toplami())
+        """Masa ücreti (5 TL yuvarlı) + aktarılan ücretler + ürün toplamı (ürünler yuvarlanmaz)."""
+        return self.guncel_masa_ucreti(now) + self.aktarilan_toplami() + int(self.urun_toplami())
 
     def kalan_geri_sayim_saniye(self, now: datetime | None = None) -> float | None:
         if self.acilis_modu == AcilisModu.NORMAL or self.hedef_saniye is None:
@@ -155,6 +170,7 @@ class Masa:
         now = datetime.now()
         self.segments = [TariffSegment(tariff_name=tarife_adi, hourly_rate=saatlik_ucret, start_time=now)]
         self.urunler = []
+        self.aktarilan_ucretler = []
         self.kol_degisim_gecmisi = []
         self.acilis_modu = acilis_modu
         self.hedef_saniye = hedef_saniye
@@ -268,6 +284,7 @@ class Masa:
         ]
         hedef.ilk_acilis_zamani = self.ilk_acilis_zamani or now
         hedef.urunler = list(self.urunler)
+        hedef.aktarilan_ucretler = list(self.aktarilan_ucretler)
         hedef.kol_degisim_gecmisi = list(self.kol_degisim_gecmisi) + [
             KolDegisimKaydi(
                 zaman=now, eski_tarife=f"{self.ad}: {eski_ozet}",
@@ -280,6 +297,30 @@ class Masa:
         hedef.kilitli = False
 
         self.kapat_ve_sifirla()
+
+    def masa_ucretini_aktar(self, hedef: "Masa") -> int:
+        """Ödeme Al > 'Masa Ücretini Başka Masaya Aktar': bu masanın GÜNCEL hesabı (masa ücreti +
+        daha önce aktarılanlar) hedef masaya "<bu masa> masasının ücreti" kalemi olarak eklenir,
+        ürünleri de hedefin ürünlerine katılır (kaybolmasın). Bu masa boşa döner. Para burada
+        TAHSİL EDİLMEZ; ciro, hedef masanın ödemesi alınınca yazılır. Aktarılan toplamı döner."""
+        now = datetime.now()
+        kendi_ucreti = self.guncel_masa_ucreti(now)
+        toplam = self.genel_toplam(now)
+        if kendi_ucreti > 0:
+            hedef.aktarilan_ucretler.append(AktarilanUcret(self.ad, kendi_ucreti, now))
+        hedef.aktarilan_ucretler.extend(self.aktarilan_ucretler)  # zincir (A->B->C) kaybolmaz
+        for u in self.urunler:
+            ayni = next((h for h in hedef.urunler
+                         if h.urun_adi == u.urun_adi and h.birim_fiyat == u.birim_fiyat), None)
+            if ayni:
+                ayni.adet += u.adet
+            else:
+                hedef.urunler.append(UrunSatisi(urun_adi=u.urun_adi, adet=u.adet,
+                                                birim_fiyat=u.birim_fiyat, eklenme_zamani=u.eklenme_zamani))
+        hedef.kol_degisim_gecmisi.append(KolDegisimKaydi(
+            zaman=now, eski_tarife=f"{self.ad}: ücret aktarıldı",
+            yeni_tarife=f"{hedef.ad}: +{int(toplam)} ₺"))
+        return int(toplam)
 
     def urun_ekle(self, urun_adi: str, birim_fiyat: float):
         """Aynı üründen zaten sepette varsa adedini 1 artırır, yoksa yeni satır açar."""
@@ -336,6 +377,7 @@ class Masa:
     def kapat_ve_sifirla(self):
         self.segments = []
         self.urunler = []
+        self.aktarilan_ucretler = []
         self.kol_degisim_gecmisi = []
         self.acilis_modu = AcilisModu.NORMAL
         self.hedef_saniye = None
@@ -392,6 +434,12 @@ class KasaIslemi:
     # rapora KATILMAZ ama Son İşlemler'de sebebiyle birlikte görünür
     # (denetim/hesap sorma amaçlı - "neden iptal edildi" hep bilinsin).
     iptal_nedeni: str | None = None
+    # Bu satışa başka masalardan aktarılan ücretler: [{"kaynak":"PS 1","tutar":125.0}, ...]
+    # (masa_ucreti bunları DAHİL eder; detayda "PS 1 masasının ücreti" olarak ayrıca gösterilir)
+    aktarilanlar: list = field(default_factory=list)
+    # Doluysa bu kayıt, masa ücretinin bu masaya AKTARILDIĞINI gösteren para-dışı denetim kaydıdır
+    # (ciroya yazılmaz; iptal_nedeni da doludur ki tüm raporlar onu satış saymasın).
+    aktarim_hedef: str | None = None
 
 
 @dataclass
@@ -755,3 +803,25 @@ class AppState:
         for a in self.avanslar:
             gunler.add(is_gunu(a.zaman))
         return sorted(gunler, reverse=True)
+
+    def ay_net_ortalamasi(self, yil: int, ay: int, bugun: date | None = None) -> tuple[float, int]:
+        """Kasa > Genel aylık rapor: ilgili ayın NET toplamının günlük ortalaması.
+        Dönen: (ortalama, bölen gün sayısı).
+        Bölen = takvim günü: ay 1'inden ay sonuna (örn. 1-30 Kasım = 30 gün). İstisnalar,
+        ortalama gerçeği yansıtsın diye: ÇALIŞMAYA BAŞLADIĞIN ilk ay kayıtlar ayın ortasında
+        başlıyorsa ilk kayıt gününden, ve İÇİNDE BULUNULAN ay henüz bitmediyse bugüne
+        (iş günü) kadar sayılır."""
+        from calendar import monthrange
+        ilk = date(yil, ay, 1)
+        son = date(yil, ay, monthrange(yil, ay)[1])
+        bugun = bugun or is_gunu(datetime.now())
+        tum = self.mevcut_gunler()
+        if tum:
+            en_eski = min(tum)
+            if (en_eski.year, en_eski.month) == (yil, ay):
+                ilk = en_eski
+        if ilk <= bugun < son and (bugun.year, bugun.month) == (yil, ay):
+            son = bugun
+        gun_sayisi = max(1, (son - ilk).days + 1)
+        ay_net = sum(self.gun_ozet(g)["net"] for g in tum if (g.year, g.month) == (yil, ay))
+        return ay_net / gun_sayisi, gun_sayisi

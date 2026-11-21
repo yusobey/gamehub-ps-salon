@@ -24,7 +24,7 @@ from datetime import datetime
 
 from core.models import (
     AppState, Masa, Borc, KasaIslemi, Gider, Avans, Not, UrunSatisi,
-    KolDegisimKaydi, MasaDurumu, AcilisModu, id_sayacini_ayarla,
+    KolDegisimKaydi, MasaDurumu, AcilisModu, id_sayacini_ayarla, AktarilanUcret,
 )
 from core.pricing import TariffSegment
 
@@ -202,6 +202,9 @@ def _masa_yaz(m: Masa) -> dict:
         "varsayilan_tarife_profili": m.varsayilan_tarife_profili, "durum": m.durum.value,
         "segments": [_segment_yaz(s) for s in m.segments],
         "urunler": [_urun_satisi_yaz(u) for u in m.urunler],
+        "aktarilan_ucretler": [
+            {"kaynak_masa": a.kaynak_masa, "tutar": a.tutar, "zaman": _dt(a.zaman)} for a in m.aktarilan_ucretler
+        ],
         "kol_degisim_gecmisi": [_kol_kaydi_yaz(k) for k in m.kol_degisim_gecmisi],
         "acilis_modu": m.acilis_modu.value, "hedef_saniye": m.hedef_saniye,
         "kilitli": m.kilitli, "ilk_acilis_zamani": _dt(m.ilk_acilis_zamani),
@@ -217,6 +220,11 @@ def _masa_oku(d: dict) -> Masa:
         durum=MasaDurumu(d.get("durum", "BOŞ")),
         segments=[_segment_oku(s) for s in d.get("segments", [])],
         urunler=[_urun_satisi_oku(u) for u in d.get("urunler", [])],
+        aktarilan_ucretler=[
+            AktarilanUcret(kaynak_masa=a.get("kaynak_masa", ""), tutar=a.get("tutar", 0.0),
+                           zaman=_dt_oku(a.get("zaman")) or datetime.now())
+            for a in d.get("aktarilan_ucretler", [])
+        ],
         kol_degisim_gecmisi=[_kol_kaydi_oku(k) for k in d.get("kol_degisim_gecmisi", [])],
         acilis_modu=AcilisModu(d.get("acilis_modu", "NORMAL")),
         hedef_saniye=d.get("hedef_saniye"), kilitli=d.get("kilitli", False),
@@ -251,6 +259,7 @@ def _kasa_islemi_yaz(k: KasaIslemi) -> dict:
         "masa_ucreti": k.masa_ucreti, "is_borc_tahsilati": k.is_borc_tahsilati,
         "is_borc_olusturma": k.is_borc_olusturma, "urunler": k.urunler,
         "iptal_nedeni": k.iptal_nedeni,
+        "aktarilanlar": k.aktarilanlar, "aktarim_hedef": k.aktarim_hedef,
     }
 
 
@@ -265,6 +274,7 @@ def _kasa_islemi_oku(d: dict) -> KasaIslemi:
         is_borc_olusturma=d.get("is_borc_olusturma", False),
         urunler=d.get("urunler", []),
         iptal_nedeni=d.get("iptal_nedeni"),
+        aktarilanlar=d.get("aktarilanlar", []), aktarim_hedef=d.get("aktarim_hedef"),
     )
 
 

@@ -173,6 +173,11 @@ QPushButton#secenekBtn:hover {{
     background-color: #E4F3FC;
     border-color: #8FD1F2;
 }}
+QPushButton#secenekBtn:checked {{
+    background-color: {RENK['accent']};
+    color: #FFFFFF;
+    border-color: {RENK['accent']};
+}}
 QPushButton#dangerBtn {{
     background-color: transparent;
     color: {RENK['danger']};
