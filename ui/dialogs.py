@@ -1220,6 +1220,8 @@ class AlisverisDialog(OrtalanmisDialog):
         self.grid_widget = QWidget()
         self.grid = QGridLayout(self.grid_widget)
         self.grid.setSpacing(10)
+        # Masa > Ürün Ekle ile AYNI düzen: kartlar sol-üstten dizilir, alan yüksekliği sabit
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         v.addWidget(self.grid_widget)
 
         self.sepet_bos_lbl = QLabel("🛒 Sepet boş")
@@ -1230,6 +1232,7 @@ class AlisverisDialog(OrtalanmisDialog):
         self.sepet_alani = QHBoxLayout()
         self.sepet_alani.setSpacing(8)
         v.addLayout(self.sepet_alani)
+        v.addStretch(1)
 
         # ÖNEMLİ: bu etiket ürün sayfasının KENDİ toplamı - ödeme sayfasındaki
         # "Ödenecek" etiketiyle (self._odeme_toplam_lbl) AYNI isim/değişken
@@ -1307,6 +1310,9 @@ class AlisverisDialog(OrtalanmisDialog):
                 w.deleteLater()
         urunler = self.state.urun_katalogu.get(self._aktif_kategori, {})
         SUTUN = self._hesapla_urun_sutun()
+        en_cok = max((len(k) for k in self.state.urun_katalogu.values()), default=0)
+        sira = max(1, min(3, -(-en_cok // SUTUN)))
+        self.grid_widget.setMinimumHeight(sira * 172 + (sira - 1) * self.grid.spacing())
         for i, (urun_adi, veri) in enumerate(urunler.items()):
             mevcut_adet = self.sepet.get(urun_adi, {}).get("adet", 0)
             chip = UrunKartiChip(
@@ -1347,6 +1353,7 @@ class AlisverisDialog(OrtalanmisDialog):
             self.sepet_bos_lbl.setVisible(False)
             for ad, v in self.sepet.items():
                 kutu = QFrame()
+                kutu.setFixedHeight(36)
                 kutu.setStyleSheet(
                     f"QFrame {{ background-color:{RENK['panel_hover']}; "
                     f"border:1px solid {RENK['border_strong']}; border-radius:8px; }}"

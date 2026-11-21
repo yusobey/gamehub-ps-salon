@@ -1387,7 +1387,7 @@ class MasaKayitlariView(QWidget):
 
         # --- Kayıtlı Masalar: açılır/kapanır başlık + doğal boyutunda liste
         # (ayrı kaydırma kutusu YOK arti_btnk - sayfa kendisi kayıyor) ---
-        self._masalar_acik = True
+        self._masalar_acik = False  # ilk açılışta kapalı; başlığa tıklayınca açılır
         liste_kutu = QFrame()
         liste_kutu.setObjectName("masaKart")
         liste_kutu_v = QVBoxLayout(liste_kutu)
@@ -1408,7 +1408,7 @@ class MasaKayitlariView(QWidget):
         # --- Tanımlı Tarife Profilleri: açılır/kapanır başlık + doğal
         # boyutunda liste (arti_btnk ayrı bir sayfa değil, gereksiz bir Ayarlar
         # maddesi kalkmış oldu) ---
-        self._profiller_acik = True
+        self._profiller_acik = False  # ilk açılışta kapalı; başlığa tıklayınca açılır
         profiller_kutu = QFrame()
         profiller_kutu.setObjectName("masaKart")
         profiller_kutu_v = QVBoxLayout(profiller_kutu)
@@ -1427,7 +1427,7 @@ class MasaKayitlariView(QWidget):
 
         # --- Masa Bazlı Tarife Ataması: açılır/kapanır başlık + doğal
         # boyutunda liste ---
-        self._masa_atama_acik = True
+        self._masa_atama_acik = False  # ilk açılışta kapalı; başlığa tıklayınca açılır
         masa_atama_kutu = QFrame()
         masa_atama_kutu.setObjectName("masaKart")
         masa_atama_kutu_v = QVBoxLayout(masa_atama_kutu)
@@ -1450,6 +1450,10 @@ class MasaKayitlariView(QWidget):
         self._grup_satirlarini_kur()
         self._profil_listesini_kur()
         self._masa_satirlarini_kur()
+        # Üç liste (Kayıtlı Masalar / Tarife Profilleri / Masa Bazlı Atama) ilk açılışta KAPALI gelir
+        self.masalar_icerik.setVisible(self._masalar_acik)
+        self.profiller_icerik.setVisible(self._profiller_acik)
+        self.masa_atama_icerik.setVisible(self._masa_atama_acik)
 
     def _profiller_ac_kapa(self):
         self._profiller_acik = not self._profiller_acik
@@ -3341,7 +3345,6 @@ class GenelRaporSayfasi(QWidget):
             baslik_lbl = QLabel(
                 f"{'📂' if acik else '🗀'}  {self.AY_ADLARI[ay-1]} {yil}   ·   Ciro: {tl(ay_ciro)} ₺   ·   Market: {tl(ay_market)} ₺   ·   Gider: {tl(ay_gider)} ₺   ·   Net: {tl(ay_net)} ₺   ·   Ortalama: {tl(ay_ort)} ₺/gün"
             )
-            baslik_lbl.setToolTip(f"Ortalama = {self.AY_ADLARI[ay-1]} {yil} net toplamı ÷ {ay_gun_sayisi} gün")
             baslik_lbl.setStyleSheet(
                 "background:transparent; font-weight:800; font-size:14px; color:#8A6A1A;"
             )
